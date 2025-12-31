@@ -99,8 +99,20 @@ function Register() {
       }
 
       const response = await authService.register(submitData);
-      toast.success('Registration successful! Please login to continue.');
-      navigate('/login');
+      
+      // ✅ FIXED: Handle different registration outcomes
+      if (response.pendingApproval) {
+        // Drivers/moto riders pending approval
+        toast.warning(response.message || 'Your account is pending admin approval');
+        // Still log them in so they can see their dashboard
+        setAuth(response.user, response.token);
+        navigate('/dashboard');
+      } else {
+        // Students - approved immediately
+        toast.success(response.message || 'Registration successful!');
+        setAuth(response.user, response.token);
+        navigate('/dashboard');
+      }
     } catch (error) {
       toast.error(error.response?.data?.message || 'Registration failed');
     } finally {

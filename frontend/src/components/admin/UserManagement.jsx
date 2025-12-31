@@ -33,10 +33,17 @@ function UserManagement() {
     }
   };
 
-  const fetchPendingUsers = async () => {
+ const fetchPendingUsers = async () => {
     try {
-      const response = await adminService.getAllUsers({ isApproved: 'false' });
-      setPendingUsers(response.users);
+      // ✅ FIXED: Only fetch drivers and moto riders who need approval
+      const response = await adminService.getAllUsers({ 
+        isApproved: 'false'
+      });
+      // Filter to only show drivers and moto_riders (students don't need approval)
+      const pendingDrivers = response.users.filter(user => 
+        user.role === 'driver' || user.role === 'moto_rider'
+      );
+      setPendingUsers(pendingDrivers);
     } catch (error) {
       console.error('Failed to fetch pending users');
     }

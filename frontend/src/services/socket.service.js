@@ -74,9 +74,9 @@ class SocketService {
     }
   }
 
+  // ✅ FIXED: Remove existing listeners before adding new ones
   onNewMessage(callback) {
     if (this.socket) {
-      // Remove any existing listeners first to prevent duplicates
       this.socket.off('new_message');
       this.socket.on('new_message', callback);
     }
@@ -84,36 +84,42 @@ class SocketService {
 
   onLocationUpdate(callback) {
     if (this.socket) {
+      this.socket.off('location_updated');
       this.socket.on('location_updated', callback);
     }
   }
 
   onTripRequest(callback) {
     if (this.socket) {
+      this.socket.off('trip_request');
       this.socket.on('trip_request', callback);
     }
   }
 
   onTripAccepted(callback) {
     if (this.socket) {
+      this.socket.off('trip_accepted');
       this.socket.on('trip_accepted', callback);
     }
   }
 
   onTripStatusUpdated(callback) {
     if (this.socket) {
+      this.socket.off('trip_status_updated');
       this.socket.on('trip_status_updated', callback);
     }
   }
 
   onTripCancelled(callback) {
     if (this.socket) {
+      this.socket.off('trip_cancelled');
       this.socket.on('trip_cancelled', callback);
     }
   }
 
   onDriverStatusChanged(callback) {
     if (this.socket) {
+      this.socket.off('driver_status_changed');
       this.socket.on('driver_status_changed', callback);
     }
   }

@@ -24,24 +24,13 @@ function DriverDashboard() {
   const isFetchingActiveTrip = useRef(false);
   const renderCount = useRef(0);
 
-  // Add missing handleStatusChange function
-  const handleStatusChange = async (newStatus) => {
-    try {
-      // Update status in backend (implement driverService.updateStatus if needed)
-      await driverService.updateStatus(newStatus);
-      updateUser({ ...user, driverStatus: newStatus });
-      toast.success(`Status updated to ${newStatus}`);
-    } catch (error) {
-      toast.error('Failed to update status');
-    }
-  };
-
   // Debug: Track renders
   renderCount.current += 1;
   console.log(`🔄 DriverDashboard RENDER #${renderCount.current}`);
   console.log('   - activeTrip:', activeTrip?._id, 'status:', activeTrip?.status);
   console.log('   - user._id:', user._id);
 
+  // Fetch active trip
   const fetchActiveTrip = useCallback(async () => {
     console.log('📞 fetchActiveTrip called, isFetching:', isFetchingActiveTrip.current);
     if (isFetchingActiveTrip.current) return;
@@ -59,14 +48,16 @@ function DriverDashboard() {
     } finally {
       isFetchingActiveTrip.current = false;
     }
-  }, []); // Empty deps - never recreate
+  }, []);
 
+  // Handle incoming trip request
   const handleTripRequest = useCallback((data) => {
     console.log('📨 handleTripRequest called');
     setPendingRequests(prev => [...prev, data.trip]);
     toast.info('New ride request received!');
   }, []);
 
+  // Location tracking
   const startLocationTracking = useCallback(() => {
     console.log('📍 startLocationTracking called, locationTracking:', locationTracking);
     if (navigator.geolocation && !locationTracking) {
@@ -77,7 +68,7 @@ function DriverDashboard() {
           // Update local state
           setCurrentLocation({ lat: latitude, lng: longitude });
           
-          // Send to server - use the latest values from closure
+          // Send to server
           socketService.updateLocation(
             user._id,
             latitude,
@@ -86,8 +77,6 @@ function DriverDashboard() {
           );
         },
         (error) => {
-          // Geolocation error - user may have denied permission or it's unavailable
-          // This is expected behavior, no need to log
           if (error.code === error.PERMISSION_DENIED) {
             console.log('Location access denied by user');
           }
@@ -100,7 +89,7 @@ function DriverDashboard() {
       );
       setLocationTracking(watchId);
     }
-  }, [locationTracking]); // Removed user._id and activeTrip._id to prevent recreation
+  }, [locationTracking, user._id, activeTrip?._id]);
 
   const stopLocationTracking = useCallback(() => {
     console.log('🛑 stopLocationTracking called');
@@ -110,61 +99,25 @@ function DriverDashboard() {
     }
   }, [locationTracking]);
 
-  useEffect(() => {
-    console.log('🎯 DriverDashboard useEffect RUNNING');
-    console.log('   - Dependencies: user._id =', user._id);
-    
-    // Connect to socket
-    socketService.connect(user._id);
-
-    // Fetch active trip once
-    fetchActiveTrip();
-
-    // Listen for trip requests
-    socketService.onTripRequest(handleTripRequest);
-
-    // Listen for counter offers from students
-    socketService.socket?.on('fare_counter_offered', (data) => {
-      console.log('💰 Student counter offer received:', data);
-      setActiveTrip(data.trip);
-      fetchActiveTrip(); // Refresh to get latest trip data
-    });
-
-    // Listen for student accepting fare
-    socketService.socket?.on('fare_accepted', (data) => {
-      console.log('✅ Student accepted fare:', data);
-      setActiveTrip(data.trip);
-      toast.success('Student accepted your fare! Trip confirmed.');
-      fetchActiveTrip();
-    });
-
-    // Listen for trip cancellations
-    socketService.socket?.on('trip_cancelled', (data) => {
-      console.log('🚫 Trip cancelled event received:', data);
-      // Show appropriate message based on who cancelled
-      const cancelledByStudent = data.trip?.cancelledBy?.role === 'student';
-      const message = cancelledByStudent 
-        ? 'Student cancelled the ride request.'
-        : 'Trip cancelled.';
-      if (cancelledByStudent) {
-        toast.error(message);
+  // Handle status change
+  const handleStatusChange = async (newStatus) => {
+    try {
+      await driverService.updateStatus(newStatus);
+      updateUser({ ...user, driverStatus: newStatus });
+      toast.success(`Status updated to ${newStatus}`);
+      
+      // Start or stop location tracking based on status
+      if (newStatus === 'offline') {
+        stopLocationTracking();
       } else {
-        toast.info(message);
+        startLocationTracking();
       }
-      // Remove from pending requests if it was pending
-      setPendingRequests(prev => prev.filter(t => t._id !== data.trip._id));
-      // Always clear active trip and force refresh
-      setActiveTrip(null);
-      fetchActiveTrip();
-    });
-
-    // Start location tracking if driver is available or on a trip
-    if (user.driverStatus !== 'offline') {
-      startLocationTracking();
+    } catch (error) {
+      toast.error('Failed to update status');
     }
+  };
 
-    // (Removed invalid return and UI block from useEffect)
-
+  // Handle accept trip
   const handleAcceptTrip = async (tripId, proposedFare) => {
     try {
       if (!proposedFare || proposedFare <= 0) {
@@ -190,6 +143,7 @@ function DriverDashboard() {
     }
   };
 
+  // Handle reject trip
   const handleRejectTrip = async (tripId) => {
     try {
       await tripService.cancelTrip(tripId, 'Driver declined the ride request');
@@ -201,22 +155,25 @@ function DriverDashboard() {
     }
   };
 
+  // Handle update trip status
   const handleUpdateTripStatus = async (status) => {
     try {
       await tripService.updateTripStatus(activeTrip._id, status);
-      setActiveTrip(prev => ({ ...prev, status }));
-      toast.success('Trip status updated');
-
+      
       if (status === 'completed') {
-        setTimeout(() => {
-          setActiveTrip(null);
-        }, 2000);
+        toast.success('Trip completed successfully!');
+        // Immediately clear the active trip so driver can accept new requests
+        setActiveTrip(null);
+      } else {
+        setActiveTrip(prev => ({ ...prev, status }));
+        toast.success('Trip status updated');
       }
     } catch (error) {
       toast.error('Failed to update trip status');
     }
   };
 
+  // Handle confirm arrival
   const handleConfirmArrival = async () => {
     try {
       const response = await tripService.confirmTrip(activeTrip._id);
@@ -227,6 +184,78 @@ function DriverDashboard() {
     }
   };
 
+  // Main useEffect for socket connections and listeners
+  useEffect(() => {
+    console.log('🎯 DriverDashboard useEffect RUNNING');
+    console.log('   - Dependencies: user._id =', user._id);
+    
+    // Connect to socket
+    socketService.connect(user._id);
+
+    // Fetch active trip once
+    fetchActiveTrip();
+
+    // Listen for trip requests
+    socketService.onTripRequest(handleTripRequest);
+
+    // Listen for counter offers from students
+    socketService.socket?.on('fare_counter_offered', (data) => {
+      console.log('💰 Student counter offer received:', data);
+      setActiveTrip(data.trip);
+      fetchActiveTrip();
+    });
+
+    // Listen for student accepting fare
+    socketService.socket?.on('fare_accepted', (data) => {
+      console.log('✅ Student accepted fare:', data);
+      setActiveTrip(data.trip);
+      toast.success('Student accepted your fare! Trip confirmed.');
+      fetchActiveTrip();
+    });
+
+    // Listen for trip cancellations
+    socketService.socket?.on('trip_cancelled', (data) => {
+      console.log('🚫 Trip cancelled event received:', data);
+      const cancelledByStudent = data.trip?.cancelledBy?.role === 'student';
+      const message = cancelledByStudent 
+        ? 'Student cancelled the ride request.'
+        : 'Trip cancelled.';
+      if (cancelledByStudent) {
+        toast.error(message);
+      } else {
+        toast.info(message);
+      }
+      setPendingRequests(prev => prev.filter(t => t._id !== data.trip._id));
+      setActiveTrip(null);
+      fetchActiveTrip();
+    });
+
+    // Listen for trip completion from student side
+    socketService.socket?.on('trip_status_updated', (data) => {
+      console.log('🔔 Trip status updated (driver):', data);
+      if (data.status === 'completed') {
+        // Clear active trip immediately when completed
+        setActiveTrip(null);
+        toast.success('Trip completed! Ready for new requests.');
+      }
+    });
+
+    // Start location tracking if driver is available or on a trip
+    if (user.driverStatus !== 'offline') {
+      startLocationTracking();
+    }
+
+    // Cleanup function
+    return () => {
+      stopLocationTracking();
+      socketService.socket?.off('fare_counter_offered');
+      socketService.socket?.off('fare_accepted');
+      socketService.socket?.off('trip_cancelled');
+      socketService.socket?.off('trip_status_updated');
+    };
+  }, [user._id, user.driverStatus, fetchActiveTrip, handleTripRequest, startLocationTracking, stopLocationTracking]);
+
+  // Check if user is approved
   if (!user.isApproved) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -272,7 +301,7 @@ function DriverDashboard() {
             path="/"
             element={
               <>
-                {/* Show TripRequests if no active trip OR if trip is still pending (driver hasn't proposed fare yet) */}
+                {/* Show TripRequests if no active trip OR if trip is still pending */}
                 {!activeTrip || activeTrip.status === 'pending' ? (
                   <TripRequests
                     requests={activeTrip && activeTrip.status === 'pending' ? [activeTrip, ...pendingRequests.filter(req => req.status === 'pending')] : pendingRequests.filter(req => req.status === 'pending')}
