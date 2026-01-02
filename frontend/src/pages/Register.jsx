@@ -80,17 +80,14 @@ function Register() {
     setLoading(true);
 
     try {
-      // Create FormData for file upload
       const submitData = new FormData();
       
-      // Append all form fields
       Object.keys(formData).forEach(key => {
         if (formData[key] && key !== 'confirmPassword') {
           submitData.append(key, formData[key]);
         }
       });
 
-      // Append photos if selected
       if (profilePhoto) {
         submitData.append('profilePhoto', profilePhoto);
       }
@@ -100,15 +97,11 @@ function Register() {
 
       const response = await authService.register(submitData);
       
-      // ✅ FIXED: Handle different registration outcomes
       if (response.pendingApproval) {
-        // Drivers/moto riders pending approval
         toast.warning(response.message || 'Your account is pending admin approval');
-        // Still log them in so they can see their dashboard
         setAuth(response.user, response.token);
         navigate('/dashboard');
       } else {
-        // Students - approved immediately
         toast.success(response.message || 'Registration successful!');
         setAuth(response.user, response.token);
         navigate('/dashboard');
@@ -316,7 +309,6 @@ function Register() {
               </>
             )}
 
-            {/* Profile Photo Upload */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Profile Photo (Optional)
@@ -332,7 +324,6 @@ function Register() {
               )}
             </div>
 
-            {/* Vehicle Photo Upload for Drivers/Riders */}
             {(formData.role === 'driver' || formData.role === 'moto_rider') && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">

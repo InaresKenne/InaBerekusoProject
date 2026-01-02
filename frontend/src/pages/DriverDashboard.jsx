@@ -198,18 +198,39 @@ function DriverDashboard() {
     // Listen for trip requests
     socketService.onTripRequest(handleTripRequest);
 
-    // Listen for counter offers from students
+    // Listen for fare negotiation events
+    // Student counter offer (when student counters driver's offer)
+    socketService.socket?.off('fare_counter_offered');
     socketService.socket?.on('fare_counter_offered', (data) => {
       console.log('💰 Student counter offer received:', data);
+      setActiveTrip(data.trip);
+      toast.info('Student made a counter offer!');
+      fetchActiveTrip();
+    });
+
+    // Driver counter offer (when driver counters)
+    socketService.socket?.off('driver_counter_offered');
+    socketService.socket?.on('driver_counter_offered', (data) => {
+      console.log('💰 Driver made counter offer:', data);
       setActiveTrip(data.trip);
       fetchActiveTrip();
     });
 
     // Listen for student accepting fare
+    socketService.socket?.off('fare_accepted');
     socketService.socket?.on('fare_accepted', (data) => {
       console.log('✅ Student accepted fare:', data);
       setActiveTrip(data.trip);
       toast.success('Student accepted your fare! Trip confirmed.');
+      fetchActiveTrip();
+    });
+    
+    // Listen for counter accepted
+    socketService.socket?.off('counter_accepted');
+    socketService.socket?.on('counter_accepted', (data) => {
+      console.log('✅ Counter offer accepted:', data);
+      setActiveTrip(data.trip);
+      toast.success('Counter offer accepted! Trip confirmed.');
       fetchActiveTrip();
     });
 
@@ -249,7 +270,9 @@ function DriverDashboard() {
     return () => {
       stopLocationTracking();
       socketService.socket?.off('fare_counter_offered');
+      socketService.socket?.off('driver_counter_offered');
       socketService.socket?.off('fare_accepted');
+      socketService.socket?.off('counter_accepted');
       socketService.socket?.off('trip_cancelled');
       socketService.socket?.off('trip_status_updated');
     };

@@ -122,16 +122,27 @@ function StudentDashboard() {
 
     // Listen for fare negotiation events
     if (socketService.socket) {
+      // Student counter offer (when student counters)
       socketService.socket.off('fare_counter_offered');
       socketService.socket.on('fare_counter_offered', (data) => {
-        console.log('fare_counter_offered event received:', data);
+        console.log('💰 Student made counter offer:', data);
         setActiveTrip(data.trip);
-        toast.info('A new fare negotiation is in progress!');
         fetchActiveTrip();
       });
+      
+      // Driver counter offer (when driver counters student's offer)
+      socketService.socket.off('driver_counter_offered');
+      socketService.socket.on('driver_counter_offered', (data) => {
+        console.log('💰 Driver made counter offer:', data);
+        setActiveTrip(data.trip);
+        toast.info('Driver made a counter offer!');
+        fetchActiveTrip();
+      });
+      
+      // Counter accepted
       socketService.socket.off('counter_accepted');
       socketService.socket.on('counter_accepted', (data) => {
-        console.log('counter_accepted event received:', data);
+        console.log('✅ Counter offer accepted:', data);
         setActiveTrip(data.trip);
         toast.success('Your fare negotiation was accepted!');
         fetchActiveTrip();
@@ -145,6 +156,7 @@ function StudentDashboard() {
       socketService.offEvent('driver_status_changed');
       if (socketService.socket) {
         socketService.socket.off('fare_counter_offered');
+        socketService.socket.off('driver_counter_offered');
         socketService.socket.off('counter_accepted');
       }
     };

@@ -600,12 +600,10 @@ exports.getActiveTrip = async (req, res) => {
         { status: 'completed', studentRating: { $exists: false } }
       ];
     } else {
-      // For drivers, include completed trips that haven't been rated yet
+      // ✅ FIXED: For drivers, ONLY show trips that are NOT completed
+      // Drivers don't need to rate trips, so completed trips should be hidden immediately
       query.driver = req.user._id;
-      query.$or = [
-        { status: { $in: ['pending', 'fare_proposed', 'accepted', 'driver_on_way', 'driver_arrived', 'in_progress'] } },
-        { status: 'completed', driverRating: { $exists: false } }
-      ];
+      query.status = { $in: ['pending', 'fare_proposed', 'accepted', 'driver_on_way', 'driver_arrived', 'in_progress'] };
     }
 
     const trip = await Trip.findOne(query)
@@ -805,11 +803,22 @@ exports.counterFare = async (req, res) => {
       });
     }
 
-    if (trip.status !== 'fare_proposed') {
+    if (trip.status !== 'fare_proposed' && trip.fareStatus !== 'negotiating') {
       return res.status(400).json({
         success: false,
         message: 'No fare proposal to counter'
       });
+    }
+    
+    // Check if it's student's turn (driver must have made the last offer)
+    if (trip.fareHistory && trip.fareHistory.length > 0) {
+      const lastOffer = trip.fareHistory[trip.fareHistory.length - 1];
+      if (lastOffer.proposedBy === 'student') {
+        return res.status(400).json({
+          success: false,
+          message: 'Waiting for driver to respond to your counter offer'
+        });
+      }
     }
 
     if (!counterAmount || counterAmount <= 0) {
@@ -820,6 +829,7 @@ exports.counterFare = async (req, res) => {
     }
 
     trip.proposedFare = counterAmount;
+    trip.status = 'fare_proposed';
     trip.fareStatus = 'negotiating';
     trip.fareHistory.push({
       amount: counterAmount,
@@ -828,9 +838,11 @@ exports.counterFare = async (req, res) => {
     });
     await trip.save();
 
-    // Emit socket event
+    // Emit socket event to both trip room and driver's personal room
     const { io } = require('../server');
     io.to(`trip_${trip._id}`).emit('fare_counter_offered', { trip });
+    io.to(trip.driver._id.toString()).emit('fare_counter_offered', { trip });
+    console.log('💰 Student counter offer emitted to driver:', trip.driver._id.toString());
 
     res.status(200).json({
       success: true,
@@ -921,11 +933,23 @@ exports.driverCounterOffer = async (req, res) => {
       });
     }
 
-    if (trip.fareStatus !== 'negotiating') {
+    // Allow driver to counter when negotiating OR when fare is first proposed
+    if (trip.fareStatus !== 'negotiating' && trip.status !== 'fare_proposed') {
       return res.status(400).json({
         success: false,
-        message: 'No student counter to respond to'
+        message: 'No fare proposal to counter'
       });
+    }
+
+    // Check if it's driver's turn (student must have made the last offer)
+    if (trip.fareHistory && trip.fareHistory.length > 0) {
+      const lastOffer = trip.fareHistory[trip.fareHistory.length - 1];
+      if (lastOffer.proposedBy === 'driver') {
+        return res.status(400).json({
+          success: false,
+          message: 'Waiting for student to respond to your counter offer'
+        });
+      }
     }
 
     if (!counterAmount || counterAmount <= 0) {
@@ -937,7 +961,7 @@ exports.driverCounterOffer = async (req, res) => {
 
     trip.proposedFare = counterAmount;
     trip.status = 'fare_proposed';
-    trip.fareStatus = 'proposed';
+    trip.fareStatus = 'negotiating';
     trip.fareHistory.push({
       amount: counterAmount,
       proposedBy: 'driver',
@@ -945,13 +969,88 @@ exports.driverCounterOffer = async (req, res) => {
     });
     await trip.save();
 
-    // Emit socket event
+    // Emit socket event to both trip room and student's personal room
     const { io } = require('../server');
     io.to(`trip_${trip._id}`).emit('driver_counter_offered', { trip });
+    io.to(trip.student._id.toString()).emit('driver_counter_offered', { trip });
+    console.log('💰 Driver counter offer emitted to student:', trip.student._id.toString());
 
     res.status(200).json({
       success: true,
       message: 'Counter offer sent to student',
+      trip
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+};
+// ... (keep all your existing imports and other functions)
+
+// @desc    Create a trip request
+// @route   POST /api/trips
+// @access  Private (Student)
+exports.createTrip = async (req, res) => {
+  try {
+    console.log('📝 Creating trip request:', req.body);
+    const { driverId, pickupLocation, dropoffLocation, estimatedFare } = req.body;
+
+    // Validate driver
+    const driver = await User.findById(driverId);
+    if (!driver || !['driver', 'moto_rider'].includes(driver.role)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found'
+      });
+    }
+
+    if (!driver.isApproved) {
+      return res.status(400).json({
+        success: false,
+        message: 'Driver is not approved'
+      });
+    }
+
+    // Create trip
+    const trip = await Trip.create({
+      student: req.user._id,
+      driver: driverId,
+      pickupLocation,
+      dropoffLocation,
+      estimatedFare,
+      status: 'pending'
+    });
+
+    // Create notification for driver
+    await Notification.create({
+      user: driverId,
+      title: 'New Ride Request',
+      message: `${req.user.firstName} ${req.user.lastName} has requested a ride`,
+      type: 'ride_request',
+      relatedTrip: trip._id,
+      relatedUser: req.user._id
+    });
+
+    // Populate trip with student details
+    await trip.populate('student', 'firstName lastName profilePhoto phoneNumber');
+
+    // ✅ FIXED: Only emit ONCE to driver's personal room (not trip room)
+    if (req.app.get('io')) {
+      console.log('🚀 Emitting trip_request to driver:', driverId.toString());
+      req.app.get('io').to(driverId.toString()).emit('trip_request', {
+        trip
+      });
+    }
+
+    // Populate driver details for response
+    await trip.populate('driver', 'firstName lastName profilePhoto phoneNumber vehicleMake vehicleModel vehicleColor licensePlate rating totalRatings');
+
+    res.status(201).json({
+      success: true,
       trip
     });
   } catch (error) {

@@ -290,12 +290,10 @@ function UserManagement() {
                         ) : (
                           <span className="text-red-600 text-sm">Blocked</span>
                         )}
-                        {(user.role === 'driver' || user.role === 'moto_rider') && (
-                          user.isApproved ? (
-                            <span className="text-green-600 text-sm">Approved</span>
-                          ) : (
-                            <span className="text-yellow-600 text-sm">Pending</span>
-                          )
+                        {user.isApproved ? (
+                          <span className="text-green-600 text-sm">Approved</span>
+                        ) : (
+                          <span className="text-yellow-600 text-sm">Pending</span>
                         )}
                       </div>
                     </td>

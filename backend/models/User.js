@@ -43,8 +43,8 @@ const userSchema = new mongoose.Schema({
   isApproved: {
     type: Boolean,
     default: function() {
-      // Only admins are auto-approved, all other users need approval
-      return this.role === 'admin';
+      // ✅ FIXED: Auto-approve students and admins
+      return this.role === 'admin' || this.role === 'student';
     }
   },
   approvedBy: {
